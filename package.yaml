@@ -25,6 +25,7 @@ dependencies:
 - mtl
 - mmorph
 - kan-extensions
+- resourcet
 
 library:
   ghc-options: -O2
