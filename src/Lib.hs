@@ -7,11 +7,12 @@
 {-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE TypeApplications           #-}
 {-# LANGUAGE TypeOperators              #-}
+{-# LANGUAGE ViewPatterns               #-}
 {-# OPTIONS_GHC -Wall                   #-}
 
 module Lib where
 
--- import           Control.Exception (mask_)
+import qualified Control.Exception as X
 import qualified Control.Monad.Trans.Except as E
 import qualified Control.Monad.Trans.State.Strict as S
 import           Data.OpenUnion
@@ -87,13 +88,13 @@ data Bracket r a where
 type Bracketed r = Eff (Bracket r ': r)
 
 
-liftBracket :: forall r r'. (Union r ~> Union r') -> Bracketed r ~> Bracketed r'
+liftBracket :: forall r r'. (Eff r ~> Eff r') -> Bracketed r ~> Bracketed r'
 liftBracket f (Freer m) = Freer $ \k -> m $ \u ->
   case decomp u of
-    Left x -> k $ weaken $ f x
+    Left x -> usingFreer k $ raise $ f $ liftEff x
     Right (Bracket alloc dealloc doit) ->
       let liftJob :: Eff r ~> Eff r'
-          liftJob n = runFreer n $ liftEff . f
+          liftJob n = runFreer n $ f . liftEff
        in usingFreer k
             . send
             $ Bracket (liftJob alloc)
@@ -101,6 +102,30 @@ liftBracket f (Freer m) = Freer $ \k -> m $ \u ->
                       (fmap liftJob doit)
 
 
+runBracket :: Bracketed '[IO] ~> IO
+runBracket (Freer m) = m $ \u ->
+  case decomp u of
+    Left x -> extract x
+    Right (Bracket alloc dealloc doit) ->
+      X.bracket (runM alloc) (fmap runM dealloc) (fmap runM doit)
+
+
 bracket :: Eff r a -> (a -> Eff r ()) -> (a -> Eff r b) -> Bracketed r b
 bracket alloc dealloc doit = send $ Bracket alloc dealloc doit
+
+fromRight :: Either a b -> b
+fromRight = either undefined id
+
+-- main :: IO ()
+-- main = runBracket $ liftBracket (fmap fromRight . runError @String) $ do
+--   bracket (effPrint "alloc") (const $ effPrint "dealloc") $ const $ do
+--     effPrint "hi"
+--     throwError "fuck"
+--     effPrint "bye"
+
+-- main :: IO ()
+-- main = runM . fmap fromRight . runError @String $ do
+--     effPrint "hi"
+--     throwError "fuck"
+--     effPrint "bye"
 
