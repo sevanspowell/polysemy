@@ -1,14 +1,17 @@
-{-# LANGUAGE DataKinds              #-}
-{-# LANGUAGE FlexibleContexts       #-}
-{-# LANGUAGE GADTs                  #-}
-{-# LANGUAGE LambdaCase             #-}
-{-# LANGUAGE ScopedTypeVariables    #-}
-{-# LANGUAGE TypeApplications       #-}
-{-# LANGUAGE TypeOperators          #-}
-{-# OPTIONS_GHC -Wall               #-}
+{-# LANGUAGE DataKinds                  #-}
+{-# LANGUAGE FlexibleContexts           #-}
+{-# LANGUAGE GADTs                      #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE LambdaCase                 #-}
+{-# LANGUAGE RankNTypes                 #-}
+{-# LANGUAGE ScopedTypeVariables        #-}
+{-# LANGUAGE TypeApplications           #-}
+{-# LANGUAGE TypeOperators              #-}
+{-# OPTIONS_GHC -Wall                   #-}
 
 module Lib where
 
+-- import           Control.Exception (mask_)
 import qualified Control.Monad.Trans.Except as E
 import qualified Control.Monad.Trans.State.Strict as S
 import           Data.OpenUnion
@@ -45,9 +48,6 @@ runTeletype = interpret $ \case
     Put s -> send $ putStrLn s
 
 
--- main :: IO ()
--- main = runM (runState "fuck" foom) >>= print
-
 
 runState :: s -> Eff (State s ': r) a -> Eff r (a, s)
 runState = stateful $ \case
@@ -75,4 +75,32 @@ runErrorRelay = relay (pure . Right) $ \(Error e) _ -> pure $ Left e
 
 subsume :: Member eff r => Eff (eff ': r) ~> Eff r
 subsume = interpret send
+
+
+effPrint :: Member IO r => String -> Eff r ()
+effPrint = send @IO . putStrLn
+
+
+data Bracket r a where
+  Bracket :: Eff r a -> (a -> Eff r ()) -> (a -> Eff r b) -> Bracket r b
+
+type Bracketed r = Eff (Bracket r ': r)
+
+
+liftBracket :: forall r r'. (Union r ~> Union r') -> Bracketed r ~> Bracketed r'
+liftBracket f (Freer m) = Freer $ \k -> m $ \u ->
+  case decomp u of
+    Left x -> k $ weaken $ f x
+    Right (Bracket alloc dealloc doit) ->
+      let liftJob :: Eff r ~> Eff r'
+          liftJob n = runFreer n $ liftEff . f
+       in usingFreer k
+            . send
+            $ Bracket (liftJob alloc)
+                      (fmap liftJob dealloc)
+                      (fmap liftJob doit)
+
+
+bracket :: Eff r a -> (a -> Eff r ()) -> (a -> Eff r b) -> Bracketed r b
+bracket alloc dealloc doit = send $ Bracket alloc dealloc doit
 
