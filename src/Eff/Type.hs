@@ -1,4 +1,3 @@
-{-# OPTIONS_GHC -ddump-simpl -dsuppress-all #-}
 {-# LANGUAGE DataKinds          #-}
 {-# LANGUAGE DeriveFunctor      #-}
 {-# LANGUAGE DerivingStrategies #-}
@@ -8,6 +7,7 @@
 {-# LANGUAGE KindSignatures     #-}
 {-# LANGUAGE MonoLocalBinds     #-}
 {-# LANGUAGE RankNTypes         #-}
+{-# LANGUAGE TupleSections      #-}
 {-# LANGUAGE TypeOperators      #-}
 {-# LANGUAGE ViewPatterns       #-}
 
@@ -18,7 +18,6 @@ module Eff.Type
   , MonadTrans (..)
   , Identity ()
   , type (~>)
-  , HFunctor (..)
   ) where
 
 import Control.Monad.Trans (MonadTrans (..))
@@ -26,14 +25,18 @@ import Data.Functor.Identity
 import Data.OpenUnion.Internal
 
 
-newtype Lift m (n :: * -> *) a = Lift
+newtype Lift m (s :: * -> *) (n :: * -> *) a = Lift
   { unLift :: m a
   }
   deriving Functor
   deriving (Applicative, Monad) via m
 
-
-type Eff (r :: [(* -> *) -> * -> *]) = Freer (Union r)
+newtype Eff r a = Eff
+  { runEff
+        :: forall f
+         . Functor f
+        => Freer (Union r f) (f (), a)
+  }
 
 newtype Freer f a = Freer
   { runFreer :: forall m. Monad m => (f (Freer f) ~> m) -> m a
@@ -79,54 +82,51 @@ liftEff u = Freer $ \k -> k u
 
 ------------------------------------------------------------------------------
 -- | Embed the action of an effect into 'Eff'.
-send :: Member eff r => eff (Eff r) a -> Eff r a
-send = liftEff . inj
+send :: Member eff r => eff Identity (Eff r) a -> Eff r a
+send e = Eff $ _ -- fmap _ . liftEff . inj
 {-# INLINE[3] send #-}
 
 
-------------------------------------------------------------------------------
--- | Embed the action of an effect into 'Eff'.
-sendM :: Member (Lift m) r => m a -> Eff r a
-sendM = liftEff . inj . Lift
-{-# INLINE[3] sendM #-}
+--------------------------------------------------------------------------------
+---- | Embed the action of an effect into 'Eff'.
+--sendM :: Member (Lift m) r => m a -> Eff r a
+--sendM = liftEff . inj . Lift
+--{-# INLINE[3] sendM #-}
 
 
-------------------------------------------------------------------------------
--- | Drop out of an 'Eff' stack into the only remaining monadic effect inside
--- it.
-runM :: Monad m => Eff '[Lift m] a -> m a
-runM = usingFreer $ \(extract -> Yo (Lift m) tk nt f) -> do
-  z <- m
-  fmap f $ runM $ nt $ pure z <$ tk
-{-# INLINE runM #-}
+--------------------------------------------------------------------------------
+---- | Drop out of an 'Eff' stack into the only remaining monadic effect inside
+---- it.
+--runM :: Monad m => Eff '[Lift m] a -> m a
+--runM = usingFreer $ \(extract -> Lift m) -> m
+--{-# INLINE runM #-}
 
 
-------------------------------------------------------------------------------
--- | Like 'runM' but for pure computations.
-run :: Eff '[Lift Identity] a -> a
-run = runIdentity . runM
-{-# INLINE run #-}
+--------------------------------------------------------------------------------
+---- | Like 'runM' but for pure computations.
+--run :: Eff '[Lift Identity] a -> a
+--run = runIdentity . runM
+--{-# INLINE run #-}
 
 
-------------------------------------------------------------------------------
--- | @'flip' 'runFreer'@
-usingFreer :: Monad m => (f (Freer f) ~> m) -> Freer f a -> m a
-usingFreer k m = runFreer m k
-{-# INLINE usingFreer #-}
+--------------------------------------------------------------------------------
+---- | @'flip' 'runFreer'@
+--usingFreer :: Monad m => (f (Freer f) ~> m) -> Freer f a -> m a
+--usingFreer k m = runFreer m k
+--{-# INLINE usingFreer #-}
 
 
--- | Inject whole @'Union' r@ into a weaker @'Union' (any ': r)@ that has one
--- more summand.
---
--- /O(1)/
-weaken :: Union r (Eff r) a -> Union (any ': r) (Eff (any ': r)) a
-weaken (Union n (Yo e tk f z)) = Union (n + 1) $
-  Yo e tk (\a -> raise $ f a) z
-{-# INLINE weaken #-}
+------ | Inject whole @'Union' r@ into a weaker @'Union' (any ': r)@ that has one
+------ more summand.
+------
+------ /O(1)/
+----weaken :: Union r (Eff r) a -> Union (any ': r) (Eff (any ': r)) a
+----weaken (Union n e) = Union (n + 1) $ hoist raise e
+----{-# INLINE weaken #-}
 
-------------------------------------------------------------------------------
--- | Analogous to MTL's 'lift'.
-raise :: Eff r a -> Eff (u ': r) a
-raise = hoistEff weaken
-{-# INLINE raise #-}
+----------------------------------------------------------------------------------
+------ | Analogous to MTL's 'lift'.
+----raise :: Eff r a -> Eff (u ': r) a
+----raise = hoistEff weaken
+----{-# INLINE raise #-}
 
