@@ -127,8 +127,8 @@ main :: IO ()
 main =
   defaultMain [
     bgroup "Writer Bench" [
-        bench "output"  $ whnf TFTF.oneBigNumber 10000
-      , bench "foldmap" $ whnf TFTF.baselineFoldMap 10000
+        bench "output"  $ whnf TFTF.badCore 10000
+      , bench "foldmap" $ whnf TFTF.goodCore 10000
     ]
   ]
 

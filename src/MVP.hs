@@ -1,66 +1,34 @@
-{-# LANGUAGE AllowAmbiguousTypes   #-}
-{-# LANGUAGE BangPatterns          #-}
-{-# LANGUAGE ConstraintKinds       #-}
-{-# LANGUAGE DefaultSignatures     #-}
-{-# LANGUAGE DeriveAnyClass        #-}
-{-# LANGUAGE FlexibleInstances     #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE QuantifiedConstraints #-}
-{-# LANGUAGE TypeFamilies          #-}
-{-# LANGUAGE UndecidableInstances  #-}
+{-# LANGUAGE BangPatterns #-}
 
-module MVP (oneBigNumber, baselineFoldMap) where
+module MVP (badCore, goodCore) where
 
 import qualified Control.Monad.State.Strict as S
-import Data.Monoid
-import Data.Foldable
-import Data.Functor.Identity
-import Data.Tuple
+import           Data.Foldable
+import           Data.Functor.Identity
+import           Data.Monoid
+import           Data.Tuple
 
+goodCore :: Int -> Int
+goodCore n = getSum $ snd $ flip S.runState mempty $ for_ [0..n] $ \i -> S.modify (<> Sum i)
 
-data Union (r :: [(* -> *) -> * -> *]) (m :: * -> *) a where
-  Union
-      :: Functor (IndexOf r n m)
-      => SNat n
-      -> IndexOf r n m a
-      -> Union r m a
+badCore :: Int -> Int
+badCore n  = getSum $ fst $ run  $ runState mempty $ for_ [0..n] $ \i ->   modify (<> Sum i)
 
-instance (Functor m) => Functor (Union r m) where
-  fmap f (Union w t) = Union w $ fmap f t
-  {-# INLINE fmap #-}
+data Union (r :: [* -> *]) a where
+  Union :: e a -> Union '[e] a
 
-class    (e ~ IndexOf r (Found r e), forall m. (Functor m => Functor (e m))) => Member e r
-instance (e ~ IndexOf r (Found r e), forall m. (Functor m => Functor (e m))) => Member e r
-
-data Nat = Z | S Nat
-
-data SNat :: Nat -> * where
-  SZ :: SNat 'Z
-  SS :: SNat n -> SNat ('S n)
-
-type family IndexOf (ts :: [k]) (n :: Nat) :: k where
-  IndexOf (k ': ks) 'Z = k
-  IndexOf (k ': ks) ('S n) = IndexOf ks n
-
-type family Found (ts :: [k]) (t :: k) :: Nat where
-  Found (t ': ts) t = 'Z
-  Found (u ': ts) t = 'S (Found ts t)
-
-decomp :: Union (e ': r) m a -> Either (Union r m a) (e m a)
-decomp (Union p a) =
-  case p of
-    SZ   -> Right a
-    SS n -> Left $ Union n a
+decomp :: Union (e ': r) a -> e a
+decomp (Union a) = a
 {-# INLINE decomp #-}
 
-absurdU :: Union '[] m a -> b
+absurdU :: Union '[] a -> b
 absurdU = absurdU
 
 newtype Semantic r a = Semantic
   { runSemantic
         :: ∀ m
          . Monad m
-        => (∀ x. Union r (Semantic r) x -> m x)
+        => (∀ x. Union r x -> m x)
         -> m a
   }
 
@@ -82,17 +50,17 @@ instance Monad (Semantic f) where
     runSemantic (f z) k
   {-# INLINE (>>=) #-}
 
-data State s m a
+data State s a
   = Get (s -> a)
   | Put s a
   deriving Functor
 
 get :: Semantic '[State s] s
-get = Semantic $ \k -> k $ Union SZ $ Get id
+get = Semantic $ \k -> k $ Union $ Get id
 {-# INLINE get #-}
 
 put :: s -> Semantic '[State s] ()
-put !s = Semantic $ \k -> k $ Union SZ $! Put s ()
+put !s = Semantic $ \k -> k $ Union $! Put s ()
 {-# INLINE put #-}
 
 modify :: (s -> s) -> Semantic '[State s] ()
@@ -107,30 +75,22 @@ runState = interpretInStateT $ \case
   Put s k -> S.put s >> pure k
 {-# INLINE[3] runState #-}
 
-baselineFoldMap :: Int -> Int
-baselineFoldMap n = getSum $ snd $ flip S.runState mempty $ for_ [0..n] $ \i -> S.modify (<> Sum i)
-
-oneBigNumber :: Int -> Int
-oneBigNumber    n = getSum $ fst $ run  $ runState mempty $ for_ [0..n] $ \i ->   modify (<> Sum i)
-
 run :: Semantic '[] a -> a
 run (Semantic m) = runIdentity $ m absurdU
 {-# INLINE run #-}
 
 interpretInStateT
-    :: (∀ x. e (Semantic (e ': r)) x -> S.StateT s (Semantic r) x)
+    :: (∀ x. e x -> S.StateT s (Semantic r) x)
     -> s
     -> Semantic (e ': r) a
     -> Semantic r (s, a)
 interpretInStateT f s (Semantic m) = Semantic $ \k ->
   fmap swap $ flip S.runStateT s $ m $ \u ->
-    case decomp u of
-        Left _ -> undefined
-        Right y -> S.mapStateT (\z -> runSemantic z k) $ f y
+    S.mapStateT (\z -> runSemantic z k) $ f $ decomp u
 {-# INLINE interpretInStateT #-}
 
 ___interpretInStateT___loop_breaker
-    :: (∀ x. e (Semantic (e ': r)) x -> S.StateT s (Semantic r) x)
+    :: (∀ x. e x -> S.StateT s (Semantic r) x)
     -> s
     -> Semantic (e ': r) a
     -> Semantic r (s, a)
