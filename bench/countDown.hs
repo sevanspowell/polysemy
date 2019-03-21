@@ -15,7 +15,8 @@ import Control.Monad.Freer.Internal (Eff(..), decomp, qApp, tsingleton)
 import Control.Monad.Freer.Error (runError, throwError)
 import Control.Monad.Freer.State (get, put, runState)
 
-import qualified Wtf as TFTF
+import Data.Monoid
+import qualified MVP as TFTF
 
 --------------------------------------------------------------------------------
                         -- State Benchmarks --
@@ -125,9 +126,19 @@ p' count  = fopen' "cats" >> replicateM_ count (fget' >> fpost' "cats") >> fclos
 main :: IO ()
 main =
   defaultMain [
-    bgroup "Countdown Bench" [
-        bench "discount"          $ whnf TFTF.countDown 10000
-      , bench "freer-simple"      $ whnf countDown 10000
-      , bench "mtl"               $ whnf countDownMTL 10000
+    bgroup "Writer Bench" [
+        bench "output"  $ whnf TFTF.oneBigNumber 10000
+      , bench "foldmap" $ whnf TFTF.baselineFoldMap 10000
     ]
   ]
+
+-- main :: IO ()
+-- main =
+--   defaultMain [
+--     bgroup "Countdown Bench" [
+--         bench "discount"          $ whnf TFTF.countDown 10000
+--       , bench "freer-simple"      $ whnf countDown 10000
+--       , bench "mtl"               $ whnf countDownMTL 10000
+--     ]
+--   ]
+

@@ -13,7 +13,6 @@ module MVP (oneBigNumber, baselineFoldMap) where
 import qualified Control.Monad.State.Strict as S
 import Data.Monoid
 import Data.Foldable
-import Data.Typeable
 import Data.Functor.Identity
 import Data.Coerce
 import Data.Tuple
@@ -46,16 +45,12 @@ type Member e r =
 
 
 
-------------------------------------------------------------------------------
 data Nat = Z | S Nat
-  deriving Typeable
 
 
-------------------------------------------------------------------------------
 data SNat :: Nat -> * where
   SZ :: SNat 'Z
-  SS :: Typeable n => SNat n -> SNat ('S n)
-  deriving Typeable
+  SS :: SNat n -> SNat ('S n)
 
 
 type family IndexOf (ts :: [k]) (n :: Nat) :: k where
@@ -68,7 +63,7 @@ type family Found (ts :: [k]) (t :: k) :: Nat where
   Found (u ': ts) t = 'S (Found ts t)
 
 
-class Typeable (Found r t) => Find (r :: [k]) (t :: k) where
+class Find (r :: [k]) (t :: k) where
   finder :: SNat (Found r t)
 
 instance {-# OVERLAPPING #-} Find (t ': z) t where
@@ -82,7 +77,6 @@ instance ( Find z t
   {-# INLINE finder #-}
 
 
-------------------------------------------------------------------------------
 decomp :: Union (e ': r) m a -> Either (Union r m a) (e m a)
 decomp (Union p a) =
   case p of
@@ -92,13 +86,11 @@ decomp (Union p a) =
 
 
 
-------------------------------------------------------------------------------
 absurdU :: Union '[] m a -> b
 absurdU = absurdU
 
 
 
-------------------------------------------------------------------------------
 inj :: forall r e a m. (Functor m , Member e r) => e m a -> Union r m a
 inj e = Union (finder @_ @r @e) e
 {-# INLINE inj #-}
@@ -118,7 +110,14 @@ newtype Semantic r a = Semantic
 data State s m a
   = Get (s -> a)
   | Put s a
-  deriving (Functor, Effect)
+  deriving Functor
+
+instance Effect (State s) where
+  weave s _ = coerce . fmap (<$ s)
+  {-# INLINE weave #-}
+
+  hoist _ = coerce
+  {-# INLINE hoist #-}
 
 get :: Member (State s) r => Semantic r s
 get = send $ Get id
@@ -139,9 +138,9 @@ modify f = do
 
 
 runState :: s -> Semantic (State s ': r) a -> Semantic r (s, a)
-runState = stateful $ \case
-  Get k   -> \s -> pure (s, k s)
-  Put s k -> const $ pure (s, k)
+runState = interpretInStateT $ \case
+  Get k   -> fmap k S.get
+  Put s k -> S.put s >> pure k
 {-# INLINE[3] runState #-}
 
 
@@ -152,7 +151,6 @@ oneBigNumber :: Int -> Int
 oneBigNumber    n = getSum $ fst $ run  $ runState mempty $ for_ [0..n] $ \i ->   modify (<> Sum i)
 
 
-------------------------------------------------------------------------------
 run :: Semantic '[] a -> a
 run (Semantic m) = runIdentity $ m absurdU
 {-# INLINE run #-}
@@ -181,17 +179,6 @@ instance Monad (Semantic f) where
   {-# INLINE (>>=) #-}
 
 
-------------------------------------------------------------------------------
-stateful
-    :: Effect e
-    => (∀ x. e (Semantic (e ': r)) x -> s -> Semantic r (s, x))
-    -> s
-    -> Semantic (e ': r) a
-    -> Semantic r (s, a)
-stateful f = interpretInStateT $ \e -> S.StateT $ fmap swap . f e
-{-# INLINE[3] stateful #-}
-
-------------------------------------------------------------------------------
 interpretInStateT
     :: Effect e
     => (∀ x. e (Semantic (e ': r)) x -> S.StateT s (Semantic r) x)
@@ -205,7 +192,7 @@ interpretInStateT f s (Semantic m) = Semantic $ \k ->
           k . fmap swap
             . weave (s', ()) (uncurry $ ___interpretInStateT___loop_breaker f)
             $ x
-        Right y -> S.mapStateT (usingSemantic k) $ f y
+        Right y -> S.mapStateT (\z -> runSemantic z k) $ f y
 {-# INLINE interpretInStateT #-}
 
 ___interpretInStateT___loop_breaker
@@ -217,15 +204,6 @@ ___interpretInStateT___loop_breaker
 ___interpretInStateT___loop_breaker = interpretInStateT
 {-# NOINLINE ___interpretInStateT___loop_breaker #-}
 
-------------------------------------------------------------------------------
-usingSemantic
-    :: Monad m
-    => (∀ x. Union r (Semantic r) x -> m x)
-    -> Semantic r a
-    -> m a
-usingSemantic k m = runSemantic m k
-{-# INLINE usingSemantic #-}
-
 
 class (∀ m. Functor m => Functor (e m)) => Effect e where
   weave
@@ -235,19 +213,6 @@ class (∀ m. Functor m => Functor (e m)) => Effect e where
       -> e m a
       -> e n (s a)
 
-  default weave
-      :: ( Coercible (e m (s a)) (e n (s a))
-         , Functor s
-         , Functor m
-         , Functor n
-         )
-      => s ()
-      -> (∀ x. s (m x) -> n (s x))
-      -> e m a
-      -> e n (s a)
-  weave s _ = coerce . fmap (<$ s)
-  {-# INLINE weave #-}
-
   hoist
         :: ( Functor m
            , Functor n
@@ -255,16 +220,6 @@ class (∀ m. Functor m => Functor (e m)) => Effect e where
         => (∀ x. m x -> n x)
         -> e m a
         -> e n a
-
-  default hoist
-      :: ( Coercible (e m a) (e n a)
-         , Functor m
-         )
-      => (∀ x. m x -> n x)
-      -> e m a
-      -> e n a
-  hoist _ = coerce
-  {-# INLINE hoist #-}
 
 
 
