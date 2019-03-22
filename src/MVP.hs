@@ -1,4 +1,14 @@
-{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE BangPatterns        #-}
+{-# LANGUAGE DataKinds           #-}
+{-# LANGUAGE DeriveFunctor       #-}
+{-# LANGUAGE GADTs               #-}
+{-# LANGUAGE KindSignatures      #-}
+{-# LANGUAGE LambdaCase          #-}
+{-# LANGUAGE RankNTypes          #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeOperators       #-}
+
+{-# OPTIONS_GHC -ddump-simpl -dsuppress-all -O2 -fstatic-argument-transformation #-}
 
 module MVP (badCore, goodCore) where
 
@@ -26,9 +36,9 @@ absurdU = absurdU
 
 newtype Semantic r a = Semantic
   { runSemantic
-        :: ∀ m
+        :: forall m
          . Monad m
-        => (∀ x. Union r x -> m x)
+        => (forall x. Union r x -> m x)
         -> m a
   }
 
@@ -80,7 +90,7 @@ run (Semantic m) = runIdentity $ m absurdU
 {-# INLINE run #-}
 
 interpretInStateT
-    :: (∀ x. e x -> S.StateT s (Semantic r) x)
+    :: (forall x. e x -> S.StateT s (Semantic r) x)
     -> s
     -> Semantic (e ': r) a
     -> Semantic r (s, a)
@@ -90,7 +100,7 @@ interpretInStateT f s (Semantic m) = Semantic $ \k ->
 {-# INLINE interpretInStateT #-}
 
 ___interpretInStateT___loop_breaker
-    :: (∀ x. e x -> S.StateT s (Semantic r) x)
+    :: (forall x. e x -> S.StateT s (Semantic r) x)
     -> s
     -> Semantic (e ': r) a
     -> Semantic r (s, a)
