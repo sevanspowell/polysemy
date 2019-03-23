@@ -8,15 +8,28 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeOperators       #-}
 
-{-# OPTIONS_GHC -ddump-simpl -dsuppress-all -O2 -fstatic-argument-transformation #-}
+{-# OPTIONS_GHC -O2 -ddump-rules -ddump-rule-firings -ddump-spec #-}
 
-module MVP (badCore, goodCore) where
+module MVP (badCore, goodCore, easy) where
 
 import qualified Control.Monad.State.Strict as S
 import           Data.Foldable
 import           Data.Functor.Identity
 import           Data.Monoid
 import           Data.Tuple
+import Control.Applicative
+
+-- slowBeforeSpecialization :: (Num a, Ord a) => Semantic '[State a] a
+-- slowBeforeSpecialization = do
+--   n <- get
+--   if n <= 0
+--      then pure n
+--      else do
+--        put $ n - 1
+--        slowBeforeSpecialization
+
+-- easy :: Int -> Int
+-- easy n = n -- fst $ run $ runState n $ slowBeforeSpecialization
 
 goodCore :: Int -> Int
 goodCore n = getSum $ snd $ flip S.runState mempty $ for_ [0..n] $ \i -> S.modify (<> Sum i)
@@ -51,6 +64,10 @@ instance Applicative (Semantic f) where
   {-# INLINE pure #-}
   Semantic f <*> Semantic a = Semantic $ \k -> f k <*> a k
   {-# INLINE (<*>) #-}
+  liftA2 f x = (<*>) (fmap f x)
+  {-# INLINE liftA2 #-}
+  a1 *> a2 = (id <$ a1) <*> a2
+  {-# INLINE (*>) #-}
 
 instance Monad (Semantic f) where
   return = pure
@@ -98,12 +115,4 @@ interpretInStateT f s (Semantic m) = Semantic $ \k ->
   fmap swap $ flip S.runStateT s $ m $ \u ->
     S.mapStateT (\z -> runSemantic z k) $ f $ decomp u
 {-# INLINE interpretInStateT #-}
-
-___interpretInStateT___loop_breaker
-    :: (forall x. e x -> S.StateT s (Semantic r) x)
-    -> s
-    -> Semantic (e ': r) a
-    -> Semantic r (s, a)
-___interpretInStateT___loop_breaker = interpretInStateT
-{-# NOINLINE ___interpretInStateT___loop_breaker #-}
 
